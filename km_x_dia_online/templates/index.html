@@ -1,1 +1,60 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Painel KM x Dia</title><style>body{margin:0;background:#f4f7f9;color:#173040;font:14px Arial}main{max-width:1280px;margin:auto;padding:30px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #d8e3ea;padding-bottom:22px}h1{margin:0;color:#123b5b}.sub{color:#6b7e8c}.actions{display:flex;gap:10px;align-items:center}button,a{padding:11px 14px;border:0;border-radius:7px;background:#1d759f;color:white;text-decoration:none;font-weight:bold;cursor:pointer}.secondary{background:#567184}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:22px 0}.card,.panel{padding:18px;background:white;border:1px solid #d8e3ea;border-radius:9px}.card span{display:block;color:#6d7f8d;font-size:12px;font-weight:bold}.card b{display:block;margin-top:15px;color:#123b5b;font-size:21px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.bars{display:grid;gap:13px;margin-top:18px}.bar{display:grid;grid-template-columns:115px 1fr 72px;gap:10px;align-items:center}.track{height:11px;background:#e8eff3;border-radius:8px;overflow:hidden}.track i{display:block;height:100%;background:#2b7fb8;border-radius:8px}.bar small{color:#70818e;text-align:right}table{width:100%;border-collapse:collapse;margin-top:17px}th,td{padding:10px;border-bottom:1px solid #e1e9ee;text-align:left}th:nth-child(n+2),td:nth-child(n+2){text-align:right}.status{min-height:20px;color:#567184}@media(max-width:750px){main{padding:18px}header{align-items:start;gap:15px;flex-direction:column}.metrics{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.bar{grid-template-columns:95px 1fr 60px}}</style></head><body><main><header><div><p class="sub">PLANEJAMENTO OPERACIONAL</p><h1>Painel KM x Dia</h1><p class="sub">Atualizado a partir da aba PROGRAMADO.</p></div><div class="actions"><button onclick="atualizar()">Atualizar dados</button><a class="secondary" href="/baixar-planilha">Baixar planilha</a></div></header><p id="status" class="status">Carregando dados...</p><section id="cards" class="metrics"></section><section class="grid"><article class="panel"><h2>KM total por empresa</h2><div id="empresas" class="bars"></div></article><article class="panel"><h2>Resumo diário</h2><table><thead><tr><th>Data</th><th>Frota</th><th>Viagens</th><th>KM Total</th><th>% Morta</th></tr></thead><tbody id="dias"></tbody></table></article></section></main><script>const f=(n,d=0)=>Number(n).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});async function carregar(){const r=await fetch('/api/dashboard'),d=await r.json();if(!d.ready){status.textContent=d.message;return}status.textContent='Base processada e pronta para consulta.';const total=d.companies.reduce((a,x)=>({op:a.op+x.km_operacional,dead:a.dead+x.km_morta,km:a.km+x.km_total,trips:a.trips+x.viagens}),{op:0,dead:0,km:0,trips:0});cards.innerHTML=[['KM Total',f(total.km,2)],['KM Operacional',f(total.op,2)],['KM Morta',f(total.dead,2)],['% KM Morta',f(total.dead/total.km*100,1)+'%'],['Viagens',f(total.trips)]].map(x=>`<article class="card"><span>${x[0]}</span><b>${x[1]}</b></article>`).join('');const max=Math.max(...d.companies.map(x=>x.km_total));empresas.innerHTML=d.companies.map(x=>`<div class="bar"><b>${x.empresa}</b><span class="track"><i style="width:${x.km_total/max*100}%"></i></span><small>${f(x.km_total)} km</small></div>`).join('');dias.innerHTML=d.daily.map(x=>`<tr><td>${new Date(x.data+'T12:00:00').toLocaleDateString('pt-BR')}</td><td>${f(x.frota)}</td><td>${f(x.viagens)}</td><td>${f(x.km_total,2)}</td><td>${f(x.km_morta/x.km_total*100,1)}%</td></tr>`).join('')}async function atualizar(){const token=prompt('Informe a senha de atualização:');if(token===null)return;status.textContent='Processando a planilha...';const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})}),d=await r.json();if(!r.ok){status.textContent=d.error;return}await carregar()}carregar()</script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Painel KM x Dia</title>
+  <style>
+    body{margin:0;background:#f4f7f9;color:#173040;font:14px Arial}main{max-width:1280px;margin:auto;padding:30px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #d8e3ea;padding-bottom:22px}h1{margin:0;color:#123b5b}.sub{color:#6b7e8c}.actions{display:flex;gap:10px;align-items:center}button,a{padding:11px 14px;border:0;border-radius:7px;background:#1d759f;color:white;text-decoration:none;font-weight:bold;cursor:pointer}.secondary{background:#567184}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:22px 0}.card,.panel{padding:18px;background:white;border:1px solid #d8e3ea;border-radius:9px}.card span{display:block;color:#6d7f8d;font-size:12px;font-weight:bold}.card b{display:block;margin-top:15px;color:#123b5b;font-size:21px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.bars{display:grid;gap:13px;margin-top:18px}.bar{display:grid;grid-template-columns:115px 1fr 72px;gap:10px;align-items:center}.track{height:11px;background:#e8eff3;border-radius:8px;overflow:hidden}.track i{display:block;height:100%;background:#2b7fb8;border-radius:8px}.bar small{color:#70818e;text-align:right}table{width:100%;border-collapse:collapse;margin-top:17px}th,td{padding:10px;border-bottom:1px solid #e1e9ee;text-align:left}th:nth-child(n+2),td:nth-child(n+2){text-align:right}.status{min-height:20px;color:#567184}.status.error{color:#a12c45;font-weight:bold}@media(max-width:750px){main{padding:18px}header{align-items:start;gap:15px;flex-direction:column}.metrics{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.bar{grid-template-columns:95px 1fr 60px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="sub">PLANEJAMENTO OPERACIONAL</p><h1>Painel KM x Dia</h1><p class="sub">Atualizado a partir da aba PROGRAMADO.</p></div>
+      <div class="actions"><button onclick="atualizar()">Atualizar dados</button><a class="secondary" href="/baixar-planilha">Baixar planilha</a></div>
+    </header>
+    <p id="status" class="status">Carregando dados...</p>
+    <section id="cards" class="metrics"></section>
+    <section class="grid">
+      <article class="panel"><h2>KM total por empresa</h2><div id="empresas" class="bars"></div></article>
+      <article class="panel"><h2>Resumo diário</h2><table><thead><tr><th>Data</th><th>Frota</th><th>Viagens</th><th>KM Total</th><th>% Morta</th></tr></thead><tbody id="dias"></tbody></table></article>
+    </section>
+  </main>
+  <script>
+    const statusEl = document.getElementById('status');
+    const cardsEl = document.getElementById('cards');
+    const empresasEl = document.getElementById('empresas');
+    const diasEl = document.getElementById('dias');
+    const f = (n,d=0) => Number(n).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+    const setStatus = (message,error=false) => { statusEl.textContent=message; statusEl.classList.toggle('error',error); };
+
+    async function carregar(){
+      try{
+        const r=await fetch('/api/dashboard');
+        const d=await r.json();
+        if(!d.ready){setStatus(d.message);return}
+        setStatus('Base processada e pronta para consulta.');
+        const total=d.companies.reduce((a,x)=>({op:a.op+x.km_operacional,dead:a.dead+x.km_morta,km:a.km+x.km_total,trips:a.trips+x.viagens}),{op:0,dead:0,km:0,trips:0});
+        cardsEl.innerHTML=[['KM Total',f(total.km,2)],['KM Operacional',f(total.op,2)],['KM Morta',f(total.dead,2)],['% KM Morta',f(total.dead/total.km*100,1)+'%'],['Viagens',f(total.trips)]].map(x=>'<article class="card"><span>'+x[0]+'</span><b>'+x[1]+'</b></article>').join('');
+        const max=Math.max(...d.companies.map(x=>x.km_total));
+        empresasEl.innerHTML=d.companies.map(x=>'<div class="bar"><b>'+x.empresa+'</b><span class="track"><i style="width:'+(x.km_total/max*100)+'%"></i></span><small>'+f(x.km_total)+' km</small></div>').join('');
+        diasEl.innerHTML=d.daily.map(x=>'<tr><td>'+new Date(x.data+'T12:00:00').toLocaleDateString('pt-BR')+'</td><td>'+f(x.frota)+'</td><td>'+f(x.viagens)+'</td><td>'+f(x.km_total,2)+'</td><td>'+f(x.km_morta/x.km_total*100,1)+'%</td></tr>').join('');
+      }catch(error){setStatus('Não foi possível carregar o painel: '+error.message,true)}
+    }
+
+    async function atualizar(){
+      const token=prompt('Informe a senha de atualização:');
+      if(token===null)return;
+      setStatus('Processando a planilha...');
+      try{
+        const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})});
+        const d=await r.json();
+        if(!r.ok){setStatus(d.error || 'Falha desconhecida ao processar a planilha.',true);return}
+        await carregar();
+      }catch(error){setStatus('Falha de conexão: '+error.message,true)}
+    }
+    carregar();
+  </script>
+</body>
+</html>
