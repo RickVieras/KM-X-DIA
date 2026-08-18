@@ -1,171 +1,121 @@
-"""Processa a aba PROGRAMADO e gera o relatório KM X DIA sem Microsoft Excel."""
-
+"""Processamento leve da aba PROGRAMADO para o painel KM x Dia."""
 from __future__ import annotations
 
 import io
-import re
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
 import requests
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 
-COL_GARAGEM = 3
-COL_FROTA = {"U": 11, "S": 12, "D": 13}
-COL_VIAGENS = {"U": 14, "S": 15, "D": 16}
-COL_OPERACIONAL = 17
-COL_MORTA = 18
-CALENDARIO_INICIO = 31
-CALENDARIO_FIM = 61
-
-HEADER = "123B5B"
-SATURDAY = "CFE2F3"
-SUNDAY = "F4CCCC"
-MIXED = "D9EAD3"
-THIN_GRAY = Side(style="thin", color="D9D9D9")
+COL_EMPRESA = 3
+COL_FROTA = (11, 12, 13)
+COL_VIAGENS = (14, 15, 16)
+COL_KM_OPERACIONAL = 17
+COL_KM_MORTA = 18
+COL_DIA_INICIAL = 31
+COL_DIA_FINAL = 61
 
 
-def number(value: object) -> float:
+def number(value) -> float:
     try:
-        return 0.0 if value is None or isinstance(value, bool) else float(value)
+        return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
 
 
-def to_date(value: object) -> date | None:
+def to_date(value):
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+            try:
+                return datetime.strptime(value.strip(), fmt).date()
+            except ValueError:
+                pass
     return None
 
 
-def safe_sheet_name(name: str, used: set[str]) -> str:
-    base = re.sub(r"[\\/:*?\[\]]", " ", name).strip()[:31] or "SEM EMPRESA"
-    candidate, index = base, 2
-    while candidate.casefold() in used:
-        suffix = f" ({index})"
-        candidate = base[: 31 - len(suffix)] + suffix
-        index += 1
-    used.add(candidate.casefold())
-    return candidate
+def transporta(row) -> bool:
+    return any("transporta" in str(row[index - 1] or "").casefold()
+               for index in range(min(COL_KM_MORTA, len(row))))
 
 
-def is_transporta(ws, row: int) -> bool:
-    return any("transporta" in str(ws.cell(row, col).value or "").casefold() for col in range(1, COL_MORTA + 1))
+def dates_in_period(ws, start_day: int, end_day: int):
+    header = next(ws.iter_rows(min_row=2, max_row=2, values_only=True), ())
+    dates = []
+    for column in range(COL_DIA_INICIAL, COL_DIA_FINAL + 1):
+        value = to_date(header[column - 1] if len(header) >= column else None)
+        if value and start_day <= value.day <= end_day:
+            dates.append((column, value))
+    return dates
 
 
-def source_export_url(sheet_id: str) -> str:
-    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+def calculate(ws, start_day: int, end_day: int):
+    dates = dates_in_period(ws, start_day, end_day)
+    company_totals = defaultdict(lambda: {"km_operacional": 0.0, "km_morta": 0.0, "km_transporta": 0.0, "km_total": 0.0, "viagens": 0.0})
+    daily = defaultdict(lambda: {"frota": 0.0, "viagens": 0.0, "km_operacional": 0.0, "km_morta": 0.0, "km_transporta": 0.0, "km_total": 0.0})
+    company_daily = defaultdict(lambda: defaultdict(lambda: {"frota": 0.0, "viagens": 0.0, "km_operacional": 0.0, "km_morta": 0.0, "km_transporta": 0.0, "km_total": 0.0}))
+
+    for row in ws.iter_rows(min_row=3, values_only=True):
+        company = str(row[COL_EMPRESA - 1] if len(row) >= COL_EMPRESA else "").strip()
+        if not company:
+            continue
+        op = number(row[COL_KM_OPERACIONAL - 1] if len(row) >= COL_KM_OPERACIONAL else 0)
+        dead = number(row[COL_KM_MORTA - 1] if len(row) >= COL_KM_MORTA else 0)
+        is_transporta = transporta(row)
+        company_totals[company]["km_operacional"] += op
+        company_totals[company]["km_morta"] += dead
+        company_totals[company]["km_transporta"] += op if is_transporta else 0
+        company_totals[company]["km_total"] += op + dead
+
+        for column, current_date in dates:
+            value = number(row[column - 1] if len(row) >= column else 0)
+            if not value:
+                continue
+            key = current_date.isoformat()
+            fleet = sum(number(row[c - 1] if len(row) >= c else 0) for c in COL_FROTA)
+            trips = sum(number(row[c - 1] if len(row) >= c else 0) for c in COL_VIAGENS)
+            for target in (daily[key], company_daily[company][key]):
+                target["frota"] += fleet
+                target["viagens"] += trips
+                target["km_operacional"] += value
+                target["km_transporta"] += value if is_transporta else 0
+                target["km_total"] += value
+    companies = [{"empresa": name, **values} for name, values in sorted(company_totals.items())]
+    daily_rows = [{"data": key, **values} for key, values in sorted(daily.items())]
+    company_daily_rows = {
+        name: [{"data": key, **values} for key, values in sorted(values.items())]
+        for name, values in company_daily.items()
+    }
+    return companies, daily_rows, company_daily_rows
 
 
 def download_source(sheet_id: str) -> bytes:
-    response = requests.get(source_export_url(sheet_id), timeout=60)
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+    response = requests.get(url, timeout=90)
     response.raise_for_status()
-    if not response.content.startswith(b"PK"):
-        raise ValueError("Não foi possível baixar a planilha. Verifique se ela está compartilhada para visualização.")
     return response.content
 
 
-def calculate(ws, day_start: int, day_end: int):
-    dates = []
-    for col in range(CALENDARIO_INICIO, CALENDARIO_FIM + 1):
-        current = to_date(ws.cell(2, col).value)
-        if current and day_start <= current.day <= day_end:
-            dates.append((col, current))
-    if not dates:
-        raise ValueError("Nenhuma data foi encontrada entre AE e BI para o período informado.")
-
-    values = defaultdict(lambda: defaultdict(lambda: [0.0] * 5))
-    types = defaultdict(lambda: defaultdict(set))
-    for row in range(3, ws.max_row + 1):
-        company = str(ws.cell(row, COL_GARAGEM).value or "").strip()
-        transporta = is_transporta(ws, row)
-        if not company and not transporta:
-            continue
-        company = company or "TRANSPORTA"
-        operational = number(ws.cell(row, COL_OPERACIONAL).value)
-        dead = number(ws.cell(row, COL_MORTA).value)
-        for col, current in dates:
-            kind = str(ws.cell(row, col).value or "").strip().upper()
-            if kind not in COL_FROTA:
-                continue
-            fleet = number(ws.cell(row, COL_FROTA[kind]).value)
-            trips = number(ws.cell(row, COL_VIAGENS[kind]).value)
-            km_operational = operational if transporta else trips * operational
-            km_dead = fleet * dead
-            total = values[company][current]
-            total[0] += fleet
-            total[1] += trips
-            total[2] += km_operational
-            total[3] += km_dead
-            total[4] += km_operational + km_dead
-            types[company][current].add(kind)
-    if not values:
-        raise ValueError("Nenhum dado de empresa foi encontrado na aba PROGRAMADO.")
-    return values, types
-
-
-def decorate(ws, title: str, records, types):
-    ws.merge_cells("A1:F1")
-    ws["A1"] = title
-    ws["A1"].font = Font(bold=True, size=14, color="FFFFFF")
-    ws["A1"].fill = PatternFill("solid", fgColor=HEADER)
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 26
-    headers = ["Data", "Frota", "Viagens", "KM Operacional", "KM x Morta", "KM Total"]
-    for column, header in enumerate(headers, 1):
-        cell = ws.cell(3, column, header)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor=HEADER)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    ws.row_dimensions[3].height = 30
-    for row, (current, metrics) in enumerate(records, 4):
-        row_types = types.get(current, set())
-        fill = MIXED if len(row_types) > 1 else SATURDAY if row_types == {"S"} else SUNDAY if row_types == {"D"} else None
-        row_values = [current, *metrics]
-        for col, value in enumerate(row_values, 1):
-            cell = ws.cell(row, col, value)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = Border(left=THIN_GRAY, right=THIN_GRAY, top=THIN_GRAY, bottom=THIN_GRAY)
-            if fill:
-                cell.fill = PatternFill("solid", fgColor=fill)
-            cell.number_format = "dd/mmm" if col == 1 else "#,##0" if col in (2, 3) else "#,##0.00"
-    for column, width in {"A": 14, "B": 12, "C": 12, "D": 19, "E": 16, "F": 16}.items():
-        ws.column_dimensions[column].width = width
-    ws.freeze_panes = "A4"
-
-
-def build_report(sheet_id: str, destination: Path, day_start: int = 1, day_end: int = 31) -> dict:
-    if not 1 <= day_start <= day_end <= 31:
-        raise ValueError("Informe dias válidos entre 1 e 31.")
-    workbook = load_workbook(io.BytesIO(download_source(sheet_id)), data_only=True, read_only=False)
+def build_report_from_bytes(source: bytes, destination: Path, start_day: int = 1, end_day: int = 31):
+    workbook = load_workbook(io.BytesIO(source), data_only=True, read_only=True)
     if "PROGRAMADO" not in workbook.sheetnames:
-        raise ValueError("A planilha de origem não possui a aba PROGRAMADO.")
-    values, types = calculate(workbook["PROGRAMADO"], day_start, day_end)
+        raise ValueError("A planilha precisa ter a aba PROGRAMADO.")
+    companies, daily, company_daily = calculate(workbook["PROGRAMADO"], start_day, end_day)
     output = Workbook()
     output.remove(output.active)
-    used = {"total por empresa"}
-    total_by_day = defaultdict(lambda: [0.0] * 5)
-    total_types = defaultdict(set)
-    companies = []
-    for company in sorted(values, key=str.casefold):
-        records = sorted(values[company].items())
-        ws = output.create_sheet(safe_sheet_name(company, used))
-        decorate(ws, f"KM X DIA — {company} | Dias {day_start:02d} a {day_end:02d}", records, types[company])
-        aggregate = [0.0] * 5
-        for current, metrics in records:
-            for index, value in enumerate(metrics):
-                aggregate[index] += value
-                total_by_day[current][index] += value
-            total_types[current].update(types[company][current])
-        companies.append({"empresa": company, "frota": aggregate[0] / len(records), "viagens": aggregate[1], "km_operacional": aggregate[2], "km_morta": aggregate[3], "km_total": aggregate[4]})
-    total = output.create_sheet("TOTAL POR EMPRESA")
-    decorate(total, f"KM X DIA — TOTAL POR DIA | Dias {day_start:02d} a {day_end:02d}", sorted(total_by_day.items()), total_types)
+    summary = output.create_sheet("TOTAL POR EMPRESA")
+    summary.append(["Empresa", "KM Operacional", "KM Morta", "KM Transporta", "KM Total", "Viagens"])
+    for company in companies:
+        summary.append([company["empresa"], company["km_operacional"], company["km_morta"], company["km_transporta"], company["km_total"], company["viagens"]])
     destination.parent.mkdir(parents=True, exist_ok=True)
     output.save(destination)
-    daily = [{"data": current.isoformat(), "frota": metrics[0], "viagens": metrics[1], "km_operacional": metrics[2], "km_morta": metrics[3], "km_total": metrics[4]} for current, metrics in sorted(total_by_day.items())]
-    return {"companies": companies, "daily": daily}
+    return {"companies": companies, "daily": daily, "company_daily": company_daily}
+
+
+def build_report(sheet_id: str, destination: Path, start_day: int = 1, end_day: int = 31):
+    return build_report_from_bytes(download_source(sheet_id), destination, start_day, end_day)
