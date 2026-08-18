@@ -38,7 +38,7 @@ allCompanies.classList.toggle('active',!empresaAtiva);clearDay.classList.toggle(
 function selecionarEmpresa(nome){empresaAtiva=nome;atualizarPainel()}
 function selecionarDia(data){diaAtivo=data;atualizarPainel()}
 async function carregar(){try{const r=await fetch('/api/dashboard'),d=await r.json();if(!d.ready){setStatus(d.message||'Ainda não há dados processados.');return}dashboard=d;atualizarPainel()}catch(e){setStatus('Não foi possível carregar o painel: '+e.message,true)}}
-async function atualizar(){const token=prompt('Informe a senha de atualização:');if(token===null)return;setStatus('Processando a planilha...');try{const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})});const d=await r.json();if(!r.ok){setStatus(d.error||'Falha ao processar a planilha.',true);return}dashboard=d;empresaAtiva='';diaAtivo='';atualizarPainel()}catch(e){setStatus('Falha de conexão: '+e.message,true)}}
+async function atualizar(){const token=prompt('Informe a senha de atualização:');if(token===null)return;setStatus('Processando a planilha...');try{const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})});const d=await r.json();if(!r.ok){setStatus(d.error||'Falha ao processar a planilha.',true);return}empresaAtiva='';diaAtivo='';await carregar()}catch(e){setStatus('Falha de conexão: '+e.message,true)}}
 carregar();
 </script>
 </body></html>
