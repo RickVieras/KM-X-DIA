@@ -14,7 +14,7 @@
 <p id="status" class="status">Carregando dados...</p>
 <section class="filters"><span class="filter-label">Filtro:</span><button id="allCompanies" class="chip active" onclick="selecionarEmpresa('')">Todas as empresas</button><span id="companyFilters"></span><button id="clearDay" class="chip" onclick="selecionarDia('')">Todo o período</button></section>
 <section id="cards" class="metrics"></section>
-<section class="grid"><article class="panel"><h2>KM total por empresa</h2><div class="sub">Clique em uma empresa para filtrar.</div><div id="empresas" class="bars"></div></article><article class="panel"><h2>Resumo diário</h2><div class="legend"><i class="sat"></i>Sábado <i class="sun"></i>Domingo</div><table><thead><tr><th>Data</th><th>Frota</th><th>Viagens</th><th>KM Total</th><th>% Morta</th></tr></thead><tbody id="dias"></tbody></table></article></section>
+<section class="grid"><article class="panel"><h2>KM total por empresa</h2><div class="sub">Clique em uma empresa para filtrar. Clique no espaço vazio para voltar ao Total geral.</div><div id="empresas" class="bars"></div></article><article class="panel"><h2>Resumo diário</h2><div class="legend"><i class="sat"></i>Sábado <i class="sun"></i>Domingo</div><table><thead><tr><th>Data</th><th>Frota</th><th>Viagens</th><th>KM Total</th><th>% Morta</th></tr></thead><tbody id="dias"></tbody></table></article></section>
 </main>
 <script>
 const statusEl=document.getElementById('status'),cardsEl=document.getElementById('cards'),empresasEl=document.getElementById('empresas'),diasEl=document.getElementById('dias'),companyFilters=document.getElementById('companyFilters'),allCompanies=document.getElementById('allCompanies'),clearDay=document.getElementById('clearDay');
@@ -39,6 +39,7 @@ function selecionarEmpresa(nome){empresaAtiva=nome;atualizarPainel()}
 function selecionarDia(data){diaAtivo=data;atualizarPainel()}
 async function carregar(){try{const r=await fetch('/api/dashboard'),d=await r.json();if(!d.ready){setStatus(d.message||'Ainda não há dados processados.');return}dashboard=d;atualizarPainel()}catch(e){setStatus('Não foi possível carregar o painel: '+e.message,true)}}
 async function atualizar(){const token=prompt('Informe a senha de atualização:');if(token===null)return;setStatus('Processando a planilha...');try{const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})});const d=await r.json();if(!r.ok){setStatus(d.error||'Falha ao processar a planilha.',true);return}empresaAtiva='';diaAtivo='';await carregar()}catch(e){setStatus('Falha de conexão: '+e.message,true)}}
+empresasEl.addEventListener("click",e=>{if(e.target===empresasEl)selecionarEmpresa("")});
 carregar();
 </script>
 </body></html>
