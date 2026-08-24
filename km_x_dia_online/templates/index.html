@@ -43,7 +43,7 @@ function atualizarPainel(){
   const titulo=[empresaAtiva||'Todas as empresas',diaAtivo?new Date(diaAtivo+'T12:00:00').toLocaleDateString('pt-BR'):'todo o período'].join(' • ');
   setStatus('Exibindo: '+titulo);
 
-  cardsEl.innerHTML=[['KM Total',f(total.km_total,2)],['KM Operacional',f(total.km_operacional,2)],['KM Morta',f(total.km_morta,2)],['% KM Morta',f(total.km_total?total.km_morta/total.km_total*100:0,1)+'%'],['Viagens',f(total.viagens)]].map(x=>'<article class="card"><span>'+x[0]+'</span><b>'+x[1]+'</b></article>').join('');
+  cardsEl.innerHTML=[['KM Total',f(total.km_total,2)],['KM Operacional',f(total.km_operacional,2)],['KM Morta no mês',f(total.km_morta,2)],['KM Transporta',f(total.km_transporta,2)],['Viagens',f(total.viagens)]].map(x=>'<article class="card"><span>'+x[0]+'</span><b>'+x[1]+'</b></article>').join('');
 
   const base=dashboard.companies||[],max=Math.max(1,...base.map(x=>Number(x.km_total||0)));
   empresasEl.innerHTML=base.map(x=>'<div class="bar '+(empresaAtiva===x.empresa?'active':'')+'" data-empresa="'+encodeURIComponent(x.empresa)+'" onclick="selecionarEmpresa(decodeURIComponent(this.dataset.empresa))"><b>'+x.empresa+'</b><span class="track"><i style="width:'+(Number(x.km_total||0)/max*100)+'%"></i></span><small>'+f(x.km_total)+' km</small></div>').join('');
