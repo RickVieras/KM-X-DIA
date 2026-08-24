@@ -5,49 +5,88 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Painel KM x Dia</title>
 <style>
-:root{--azul:#1d759f;--escuro:#123b5b;--fundo:#f4f7f9;--linha:#d8e3ea}*{box-sizing:border-box}body{margin:0;background:var(--fundo);color:#173040;font:14px Arial}main{max-width:1320px;margin:auto;padding:30px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--linha);padding-bottom:22px}h1{margin:0;color:var(--escuro)}.sub{color:#6b7e8c}.actions{display:flex;gap:10px}button,a{padding:11px 14px;border:0;border-radius:7px;background:var(--azul);color:#fff;text-decoration:none;font-weight:bold;cursor:pointer}.secondary{background:#567184}.status{min-height:20px;color:#567184}.error{color:#a12c45;font-weight:bold}.filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0}.filter-label{font-weight:bold;color:#567184}.chip{background:#e6eef3;color:#24465b}.chip.active{background:var(--escuro);color:#fff}.metrics{display:grid;grid-template-columns:repeat(5,1fr);
+:root{--azul:#1d759f;--escuro:#123b5b;--fundo:#f4f7f9;--linha:#d8e3ea}*{box-sizing:border-box}body{margin:0;background:var(--fundo);color:#173040;font:14px Arial}main{max-width:1320px;margin:auto;padding:30px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--linha);padding-bottom:22px}h1{margin:0;color:var(--escuro)}.sub{color:#6b7e8c}.actions{display:flex;gap:10px}button,a{padding:11px 14px;border:0;border-radius:7px;background:var(--azul);color:#fff;text-decoration:none;font-weight:bold;cursor:pointer}.secondary{background:#567184}.status{min-height:20px;color:#567184}.error{color:#a12c45;font-weight:bold}.filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0}.filter-label{font-weight:bold;color:#567184}.chip{background:#e6eef3;color:#24465b}.chip.active{background:var(--escuro);color:#fff}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:22px 0}.card,.panel{padding:18px;background:white;border:1px solid var(--linha);border-radius:9px}.card span{display:block;color:#6d7f8d;font-size:12px;font-weight:bold}.card b{display:block;margin-top:15px;color:var(--escuro);font-size:21px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.bars{display:grid;gap:9px;margin-top:18px}.bar{display:grid;grid-template-columns:145px 1fr 85px;gap:10px;align-items:center;cursor:pointer;padding:7px;border-radius:6px}.bar:hover,.bar.active{background:#eef6fa}.track{height:11px;background:#e8eff3;border-radius:8px;overflow:hidden}.track i{display:block;height:100%;background:#2b7fb8;border-radius:8px}.bar small{text-align:right;color:#70818e}table{width:100%;border-collapse:collapse;margin-top:17px}th,td{padding:10px;border-bottom:1px solid #e1e9ee;text-align:left}th:nth-child(n+2),td:nth-child(n+2){text-align:right}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.active{background:#eef6fa}.saturday{background:#e6f1ff}.sunday{background:#ffe9e9}.saturday td:first-child{color:#1264b0;font-weight:bold}.sunday td:first-child{color:#bc2e35;font-weight:bold}.legend{font-size:12px;color:#6b7e8c}.legend i{display:inline-block;width:11px;height:11px;margin:0 4px 0 10px;border-radius:2px}.legend .sat{background:#cfe4ff}.legend .sun{background:#ffd5d5}@media(max-width:900px){.metrics{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}@media(max-width:650px){main{padding:18px}header{align-items:start;gap:15px;flex-direction:column}.bar{grid-template-columns:95px 1fr 65px}}
+</style>
 </head>
 <body>
 <main>
 <header><div><p class="sub">PLANEJAMENTO OPERACIONAL</p><h1>Painel KM x Dia</h1><p class="sub">Clique em uma empresa ou em um dia para detalhar os indicadores.</p></div><div class="actions"><button onclick="atualizar()">Atualizar dados</button><a class="secondary" href="/baixar-planilha">Baixar planilha</a></div></header>
 <p id="status" class="status">Carregando dados...</p>
+
 <section class="filters"><span class="filter-label">Filtro:</span><button id="allCompanies" class="chip active" onclick="selecionarEmpresa('')">Todas as empresas</button><span id="companyFilters"></span><button id="clearDay" class="chip" onclick="selecionarDia('')">Todo o período</button></section>
+
 <section id="cards" class="metrics"></section>
-<section class="grid"><article class="panel"><h2>KM total por empresa</h2><div class="sub">Clique em uma empresa para filtrar. Clique no espaço vazio para voltar ao Total geral.</div><div id="empresas" class="bars"></div></article><article class="panel"><h2>Resumo diário</h2><div class="legend"><i class="sat"></i>Sábado <i class="sun"></i>Domingo</div><table><thead><tr><th>Data</th><th>Frota</th><th>Viagens</th><th>KM Operacional</th><th>KM Morta</th><th>KM Total</th></tr></thead><tbody id="dias"></tbody></table></article></section></main>
+
+<section class="grid">
+<article class="panel"><h2>KM total por empresa</h2><div class="sub">Clique em uma empresa para filtrar. Clique no espaço vazio para voltar ao Total geral.</div><div id="empresas" class="bars"></div></article>
+<article class="panel"><h2>Resumo diário</h2><div class="legend"><i class="sat"></i>Sábado <i class="sun"></i>Domingo</div><table><thead><tr><th>Data</th><th>Frota</th><th>Viagens</th><th>KM Operacional</th><th>KM Morta</th><th>KM Total</th></tr></thead><tbody id="dias"></tbody></table></article>
+</section>
+</main>
+
 <script>
 const statusEl=document.getElementById('status'),cardsEl=document.getElementById('cards'),empresasEl=document.getElementById('empresas'),diasEl=document.getElementById('dias'),companyFilters=document.getElementById('companyFilters'),allCompanies=document.getElementById('allCompanies'),clearDay=document.getElementById('clearDay');
 let dashboard=null,empresaAtiva='',diaAtivo='';
 const f=(n,d=0)=>Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
 const setStatus=(m,e=false)=>{statusEl.textContent=m;statusEl.classList.toggle('error',e)};
-const totalizar=rows=>rows.reduce((a,x)=>({frota:a.frota+Number(x.frota||0),viagens:a.viagens+Number(x.viagens||0),km_operacional:a.km_operacional+Number(x.km_operacional||0),km_morta:a.km_morta+Number(x.km_morta||0),km_transporta:a.km_transporta+Number(x.km_transporta||0),km_total:a.km_total+Number(x.km_total||0)}),{frota:0,viagens:0,km_operacional:0,km_morta:0,km_transporta:0,km_total:0});
+const totalizar=rows=>rows.reduce((a,x)=>({frota:a.frota+Number(x.frota||0),viagens:a.viagens+Number(x.viagens||0),km_operacional:a.km_operacional+Number(x.km_operacional||0),km_morta:a.km_morta+Number(x.km_morta||0),km_total:a.km_total+Number(x.km_total||0)}),{frota:0,viagens:0,km_operacional:0,km_morta:0,km_total:0});
+
 function rowsAtuais(){let rows=empresaAtiva?(dashboard.company_daily||{})[empresaAtiva]||[]:dashboard.daily||[];return diaAtivo?rows.filter(x=>x.data===diaAtivo):rows}
-function atualizarPainel(){if(!dashboard)return;const rows=rowsAtuais();let total;
-if(diaAtivo)total=totalizar(rows);else if(empresaAtiva)total=dashboard.companies.find(x=>x.empresa===empresaAtiva)||totalizar(rows);else total=totalizar(dashboard.companies||[]);
-const titulo=[empresaAtiva||'Todas as empresas',diaAtivo?new Date(diaAtivo+'T12:00:00').toLocaleDateString('pt-BR'):'todo o período'].join(' • ');
-setStatus('Exibindo: '+titulo);
-cardsEl.innerHTML=[['KM Total',f(total.km_total,2)],['KM Operacional',f(total.km_operacional,2)],['KM Morta',f(total.km_morta,2)],['KM TranspocardsEl.innerHTML=[['KM Total',f(total.km_total,2)],['KM Operacional',f(total.km_operacional,2)],['KM Morta',f(total.km_morta,2)],['% KM Morta',f(total.km_total?total.km_morta/total.km_total*100:0,1)+'%'],['Viagens',f(total.viagens)]].map(x=>'<article class="card"><span>'+x[0]+'</span><b>'+x[1]+'</b></article>').join('');
-const base=dashboard.companies||[],max=Math.max(1,...base.map(x=>Number(x.km_total||0)));
-empresasEl.innerHTML=base.map(x=>'<div class="bar '+(empresaAtiva===x.empresa?'active':'')+'" data-empresa="'+encodeURIComponent(x.empresa)+'" onclick="selecionarEmpresa(decodeURIComponent(this.dataset.empresa))"><b>'+x.empresa+'</b><span class="track"><i style="width:'+(Number(x.km_total||0)/max*100)+'%"></i></span><small>'+f(x.km_total)+' km</small></div>').join('');
-const allRows=empresaAtiva?(dashboard.company_daily||{})[empresaAtiva]||[]:dashboard.daily||[];
-diasEl.innerHTML=allRows.map(x=>{
-  const d=new Date(x.data+'T12:00:00');
-  const week=d.getDay();
-  const cls=(week===6?'saturday ':week===0?'sunday ':'')+(diaAtivo===x.data?'active':'');
-  return '<tr class="'+cls+'" data-dia="'+x.data+'" onclick="selecionarDia(this.dataset.dia)">'+
-    '<td>'+d.toLocaleDateString('pt-BR')+'</td>'+
-    '<td>'+f(x.frota)+'</td>'+
-    '<td>'+f(x.viagens)+'</td>'+
-    '<td>'+f(x.km_operacional,2)+'</td>'+
-    '<td>'+f(x.km_morta,2)+'</td>'+
-    '<td>'+f(x.km_total,2)+'</td>'+
-  '</tr>';
-}).join('');
+
+function atualizarPainel(){
+  if(!dashboard)return;
+  const rows=rowsAtuais();
+  let total;
+  if(diaAtivo)total=totalizar(rows);
+  else if(empresaAtiva)total=dashboard.companies.find(x=>x.empresa===empresaAtiva)||totalizar(rows);
+  else total=totalizar(dashboard.companies||[]);
+
+  const titulo=[empresaAtiva||'Todas as empresas',diaAtivo?new Date(diaAtivo+'T12:00:00').toLocaleDateString('pt-BR'):'todo o período'].join(' • ');
+  setStatus('Exibindo: '+titulo);
+
+  cardsEl.innerHTML=[['KM Total',f(total.km_total,2)],['KM Operacional',f(total.km_operacional,2)],['KM Morta',f(total.km_morta,2)],['% KM Morta',f(total.km_total?total.km_morta/total.km_total*100:0,1)+'%'],['Viagens',f(total.viagens)]].map(x=>'<article class="card"><span>'+x[0]+'</span><b>'+x[1]+'</b></article>').join('');
+
+  const base=dashboard.companies||[],max=Math.max(1,...base.map(x=>Number(x.km_total||0)));
+  empresasEl.innerHTML=base.map(x=>'<div class="bar '+(empresaAtiva===x.empresa?'active':'')+'" data-empresa="'+encodeURIComponent(x.empresa)+'" onclick="selecionarEmpresa(decodeURIComponent(this.dataset.empresa))"><b>'+x.empresa+'</b><span class="track"><i style="width:'+(Number(x.km_total||0)/max*100)+'%"></i></span><small>'+f(x.km_total)+' km</small></div>').join('');
+
+  const allRows=empresaAtiva?(dashboard.company_daily||{})[empresaAtiva]||[]:dashboard.daily||[];
+  diasEl.innerHTML=allRows.map(x=>{
+    const d=new Date(x.data+'T12:00:00');
+    const week=d.getDay();
+    const cls=(week===6?'saturday ':week===0?'sunday ':'')+(diaAtivo===x.data?'active':'');
+    return '<tr class="'+cls+'" data-dia="'+x.data+'" onclick="selecionarDia(this.dataset.dia)">'+
+      '<td>'+d.toLocaleDateString('pt-BR')+'</td>'+
+      '<td>'+f(x.frota)+'</td>'+
+      '<td>'+f(x.viagens)+'</td>'+
+      '<td>'+f(x.km_operacional,2)+'</td>'+
+      '<td>'+f(x.km_morta,2)+'</td>'+
+      '<td>'+f(x.km_total,2)+'</td>'+
+    '</tr>';
+  }).join('');
+
+  companyFilters.innerHTML=base.map(x=>'<button class="chip '+(empresaAtiva===x.empresa?'active':'')+'" onclick="selecionarEmpresa('+JSON.stringify(x.empresa)+')">'+x.empresa+'</button>').join('');
+  allCompanies.classList.toggle('active',!empresaAtiva);
+  clearDay.classList.toggle('active',!diaAtivo);
 }
+
 function selecionarEmpresa(nome){empresaAtiva=nome;atualizarPainel()}
 function selecionarDia(data){diaAtivo=data;atualizarPainel()}
+
 async function carregar(){try{const r=await fetch('/api/dashboard'),d=await r.json();if(!d.ready){setStatus(d.message||'Ainda não há dados processados.');return}dashboard=d;atualizarPainel()}catch(e){setStatus('Não foi possível carregar o painel: '+e.message,true)}}
-async function atualizar(){const token=prompt('Informe a senha de atualização:');if(token===null)return;setStatus('Processando a planilha...');try{const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})});const d=await r.json();if(!r.ok){setStatus(d.error||'Falha ao processar a planilha.',true);return}empresaAtiva='';diaAtivo='';await carregar()}catch(e){setStatus('Falha de conexão: '+e.message,true)}}
+
+async function atualizar(){
+  const token=prompt('Informe a senha de atualização:');
+  if(token===null)return;
+  setStatus('Processando a planilha...');
+  try{
+    const r=await fetch('/api/atualizar',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Token':token},body:JSON.stringify({dia_inicial:1,dia_final:31})});
+    const d=await r.json();
+    if(!r.ok){setStatus(d.error||'Falha ao processar a planilha.',true);return}
+    empresaAtiva='';diaAtivo='';await carregar()
+  }catch(e){setStatus('Falha de conexão: '+e.message,true)}
+}
+
 empresasEl.addEventListener("click",e=>{if(e.target===empresasEl)selecionarEmpresa("")});
 carregar();
 </script>
-</body></html>
+</body>
+</html>
