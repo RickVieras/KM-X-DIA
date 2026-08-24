@@ -28,7 +28,7 @@ const statusEl=document.getElementById('status'),cardsEl=document.getElementById
 let dashboard=null,empresaAtiva='',diaAtivo='';
 const f=(n,d=0)=>Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
 const setStatus=(m,e=false)=>{statusEl.textContent=m;statusEl.classList.toggle('error',e)};
-const totalizar=rows=>rows.reduce((a,x)=>({frota:a.frota+Number(x.frota||0),viagens:a.viagens+Number(x.viagens||0),km_operacional:a.km_operacional+Number(x.km_operacional||0),km_morta:a.km_morta+Number(x.km_morta||0),km_total:a.km_total+Number(x.km_total||0)}),{frota:0,viagens:0,km_operacional:0,km_morta:0,km_total:0});
+const totalizar=rows=>rows.reduce((a,x)=>({frota:a.frota+Number(x.frota||0),viagens:a.viagens+Number(x.viagens||0),km_operacional:a.km_operacional+Number(x.km_operacional||0),km_morta:a.km_morta+Number(x.km_morta||0),km_transporta:a.km_transporta+Number(x.km_transporta||0),km_total:a.km_total+Number(x.km_total||0)}),{frota:0,viagens:0,km_operacional:0,km_morta:0,km_transporta:0,km_total:0});
 
 function rowsAtuais(){let rows=empresaAtiva?(dashboard.company_daily||{})[empresaAtiva]||[]:dashboard.daily||[];return diaAtivo?rows.filter(x=>x.data===diaAtivo):rows}
 
