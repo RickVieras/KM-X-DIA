@@ -48,6 +48,7 @@ def calculate(ws,start_day,end_day):
     dates=dates_in_period(ws,start_day,end_day)
     result=defaultdict(lambda:defaultdict(lambda:{field:0.0 for field in FIELDS}))
     types=defaultdict(lambda:defaultdict(set))
+    transporta_por_empresa=defaultdict(float)
     for row in ws.iter_rows(min_row=3,values_only=True):
         raw=row[COL_EMPRESA-1] if len(row)>=COL_EMPRESA else None
         company=str(raw).strip() if raw is not None else ""
@@ -57,13 +58,15 @@ def calculate(ws,start_day,end_day):
         if company.casefold() in {"none","nan","null","-","total","total geral","total por empresa"}:continue
         operational=number(row[COL_OPERACIONAL-1] if len(row)>=COL_OPERACIONAL else 0)
         dead_rate=number(row[COL_MORTA-1] if len(row)>=COL_MORTA else 0)
+        if transporta:
+        transporta_por_empresa[company]+=number(row[COL_TRANSPORTA-1] if len(row)>=COL_TRANSPORTA else 0)
         for column,current in dates:
             schedule=str(row[column-1] if len(row)>=column else "").strip().upper()
             if schedule not in COL_FROTA:continue
             fleet=number(row[COL_FROTA[schedule]-1] if len(row)>=COL_FROTA[schedule] else 0)
             trips=number(row[COL_VIAGENS[schedule]-1] if len(row)>=COL_VIAGENS[schedule] else 0)
             op=0 if transporta else trips*operational
-            km_transporta=number(row[COL_TRANSPORTA-1] if len(row)>=COL_TRANSPORTA else 0) if transporta else 0
+            km_transporta=0
             dead=fleet*dead_rate
             key=current.isoformat();entry=result[company][key]
             entry["frota"]+=fleet;entry["viagens"]+=trips;entry["km_operacional"]+=op
@@ -75,6 +78,8 @@ def calculate(ws,start_day,end_day):
         total={"empresa":company,**{field:0.0 for field in FIELDS}};out=[]
         for key,values in sorted(rows.items()):
             out.append({"data":key,**values,"tipos":sorted(types[company][key])})
+            total["km_transporta"]=transporta_por_empresa[company]
+            total["km_total"]+=total["km_transporta"]
             for field in FIELDS:total[field]+=values[field];all_daily[key][field]+=values[field]
         companies.append(total);company_daily[company]=out
     daily=[{"data":key,**values}for key,values in sorted(all_daily.items())]
