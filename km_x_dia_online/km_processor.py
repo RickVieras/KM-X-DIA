@@ -49,42 +49,76 @@ def calculate(ws,start_day,end_day):
     result=defaultdict(lambda:defaultdict(lambda:{field:0.0 for field in FIELDS}))
     types=defaultdict(lambda:defaultdict(set))
     transporta_por_empresa=defaultdict(float)
+
     for row in ws.iter_rows(min_row=3,values_only=True):
         raw=row[COL_EMPRESA-1] if len(row)>=COL_EMPRESA else None
         company=str(raw).strip() if raw is not None else ""
-        if not company:continue
+        if not company:
+            continue
+
         linha=str(row[COL_LINHA-1] if len(row)>=COL_LINHA else "").strip()
         transporta=is_transporta(linha)
-        if company.casefold() in {"none","nan","null","-","total","total geral","total por empresa"}:continue
+
+        if company.casefold() in {"none","nan","null","-","total","total geral","total por empresa"}:
+            continue
+
         operational=number(row[COL_OPERACIONAL-1] if len(row)>=COL_OPERACIONAL else 0)
         dead_rate=number(row[COL_MORTA-1] if len(row)>=COL_MORTA else 0)
+
+        # Soma KM Período uma única vez por linha Transporta.
         if transporta:
-        transporta_por_empresa[company]+=number(row[COL_TRANSPORTA-1] if len(row)>=COL_TRANSPORTA else 0)
+            transporta_por_empresa[company]+=number(
+                row[COL_TRANSPORTA-1] if len(row)>=COL_TRANSPORTA else 0
+            )
+
         for column,current in dates:
             schedule=str(row[column-1] if len(row)>=column else "").strip().upper()
-            if schedule not in COL_FROTA:continue
+            if schedule not in COL_FROTA:
+                continue
+
             fleet=number(row[COL_FROTA[schedule]-1] if len(row)>=COL_FROTA[schedule] else 0)
             trips=number(row[COL_VIAGENS[schedule]-1] if len(row)>=COL_VIAGENS[schedule] else 0)
+
+            # Transporta não interfere no cálculo diário operacional.
             op=0 if transporta else trips*operational
-            km_transporta=0
             dead=fleet*dead_rate
-            key=current.isoformat();entry=result[company][key]
-            entry["frota"]+=fleet;entry["viagens"]+=trips;entry["km_operacional"]+=op
-            entry["km_morta"]+=dead;entry["km_transporta"]+=km_transporta;entry["km_total"]+=op+dead+km_transporta
+
+            key=current.isoformat()
+            entry=result[company][key]
+            entry["frota"]+=fleet
+            entry["viagens"]+=trips
+            entry["km_operacional"]+=op
+            entry["km_morta"]+=dead
+            entry["km_total"]+=op+dead
             types[company][key].add(schedule)
-    if not result:raise ValueError("Nenhum dado de empresa foi encontrado na aba PROGRAMADO.")
-    companies=[];all_daily=defaultdict(lambda:{field:0.0 for field in FIELDS});company_daily={}
+
+    if not result:
+        raise ValueError("Nenhum dado de empresa foi encontrado na aba PROGRAMADO.")
+
+    companies=[]
+    all_daily=defaultdict(lambda:{field:0.0 for field in FIELDS})
+    company_daily={}
+
     for company,rows in sorted(result.items()):
-        total={"empresa":company,**{field:0.0 for field in FIELDS}};out=[]
+        total={"empresa":company,**{field:0.0 for field in FIELDS}}
+        out=[]
+
         for key,values in sorted(rows.items()):
             out.append({"data":key,**values,"tipos":sorted(types[company][key])})
-            total["km_transporta"]=transporta_por_empresa[company]
-            total["km_total"]+=total["km_transporta"]
-            for field in FIELDS:total[field]+=values[field];all_daily[key][field]+=values[field]
-        companies.append(total);company_daily[company]=out
-    daily=[{"data":key,**values}for key,values in sorted(all_daily.items())]
-    return companies,daily,company_daily
 
+            for field in FIELDS:
+                total[field]+=values[field]
+                all_daily[key][field]+=values[field]
+
+        # Aqui fica fora do laço diário: entra uma única vez no cartão da empresa.
+        total["km_transporta"]=transporta_por_empresa[company]
+        total["km_total"]+=total["km_transporta"]
+
+        companies.append(total)
+        company_daily[company]=out
+
+    daily=[{"data":key,**values} for key,values in sorted(all_daily.items())]
+    return companies,daily,company_daily
 def download_source(sheet_id):
     response=requests.get(f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx",timeout=90)
     response.raise_for_status();return response.content
