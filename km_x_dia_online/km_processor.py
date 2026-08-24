@@ -62,8 +62,8 @@ def calculate(ws,start_day,end_day):
             if schedule not in COL_FROTA:continue
             fleet=number(row[COL_FROTA[schedule]-1] if len(row)>=COL_FROTA[schedule] else 0)
             trips=number(row[COL_VIAGENS[schedule]-1] if len(row)>=COL_VIAGENS[schedule] else 0)
-            op=number(row[COL_TRANSPORTA-1] if len(row)>=COL_TRANSPORTA else 0) if transporta else trips*operational
-            km_transporta=0
+            op=0 if transporta else trips*operational
+            km_transporta=number(row[COL_TRANSPORTA-1] if len(row)>=COL_TRANSPORTA else 0) if transporta else 0
             dead=fleet*dead_rate
             key=current.isoformat();entry=result[company][key]
             entry["frota"]+=fleet;entry["viagens"]+=trips;entry["km_operacional"]+=op
