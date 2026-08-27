@@ -11,7 +11,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 
 from km_processor import build_report, build_report_from_bytes
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=".")
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
 
 OUTPUT_DIR = Path("data")
