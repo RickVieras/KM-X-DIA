@@ -1,4 +1,4 @@
-"""Aplicação web: histórico mensal, painel e download do KM X DIA."""
+"""AplicaÃ§Ã£o web: histÃ³rico mensal, painel e download do KM X DIA."""
 from __future__ import annotations
 
 import io
@@ -10,7 +10,7 @@ from tempfile import NamedTemporaryFile
 
 from flask import Flask, jsonify, render_template, request, send_file
 
-from km_processor import build_report, build_report_from_bytes
+from km_processor import build_report, build_report_from_file
 from supabase_history import SupabaseHistory
 
 app = Flask(__name__, template_folder=".")
@@ -35,9 +35,9 @@ def month_from_payload(payload: dict) -> tuple[int, int]:
         value = datetime.fromisoformat(item["data"])
         periods.add((value.year, value.month))
     if not periods:
-        raise ValueError("Não foi possível identificar o mês pelas datas da planilha.")
+        raise ValueError("NÃ£o foi possÃ­vel identificar o mÃªs pelas datas da planilha.")
     if len(periods) != 1:
-        raise ValueError("A planilha deve conter datas de apenas um mês.")
+        raise ValueError("A planilha deve conter datas de apenas um mÃªs.")
     return periods.pop()
 
 
@@ -51,11 +51,11 @@ def normalized_payload(row: dict) -> dict:
 @app.get("/api/periodos")
 def periods():
     if not HISTORY.enabled:
-        return jsonify({"error": "Supabase não configurado no Render."}), 500
+        return jsonify({"error": "Supabase nÃ£o configurado no Render."}), 500
     try:
         return jsonify({"periodos": HISTORY.list_periods()})
     except Exception as error:
-        app.logger.exception("Falha ao listar períodos")
+        app.logger.exception("Falha ao listar perÃ­odos")
         return jsonify({"error": str(error)}), 500
 
 
@@ -67,14 +67,14 @@ def dashboard():
             month = request.args.get("mes", type=int)
             row = HISTORY.get_month(year, month) if year and month else HISTORY.latest()
             if not row:
-                return jsonify({"ready": False, "message": "Ainda não há um mês salvo no histórico."})
+                return jsonify({"ready": False, "message": "Ainda nÃ£o hÃ¡ um mÃªs salvo no histÃ³rico."})
             return jsonify({"ready": True, **normalized_payload(row)})
         if not DATA.exists():
-            return jsonify({"ready": False, "message": "Ainda não há uma atualização processada."})
+            return jsonify({"ready": False, "message": "Ainda nÃ£o hÃ¡ uma atualizaÃ§Ã£o processada."})
         return jsonify({"ready": True, **json.loads(DATA.read_text(encoding="utf-8"))})
     except Exception as error:
         app.logger.exception("Falha ao carregar o painel")
-        return jsonify({"error": f"Falha ao carregar o histórico: {error}"}), 500
+        return jsonify({"error": f"Falha ao carregar o histÃ³rico: {error}"}), 500
 
 
 def authorized() -> bool:
@@ -93,11 +93,12 @@ def save_local(payload: dict, temporary_report: Path) -> None:
 @app.post("/api/atualizar")
 def update():
     if not authorized():
-        return jsonify({"error": "Acesso não autorizado."}), 401
+        return jsonify({"error": "Acesso nÃ£o autorizado."}), 401
     if not HISTORY.enabled:
         return jsonify({"error": "Configure SUPABASE_URL e SUPABASE_SECRET_KEY no Render."}), 500
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     temporary_report = OUTPUT_DIR / "KM X DIA.processando.xlsx"
+    temporary_upload = None
     try:
         start_raw = request.form.get("data_inicial")
         end_raw = request.form.get("data_final")
@@ -110,10 +111,14 @@ def update():
             extension = Path(upload.filename).suffix.casefold()
             if extension not in ALLOWED_EXTENSIONS:
                 return jsonify({"error": "Envie uma planilha no formato .xlsx ou .xlsm."}), 400
-            source = upload.read()
-            if not source:
-                return jsonify({"error": "O arquivo enviado está vazio."}), 400
-            payload = build_report_from_bytes(source, temporary_report, start, end)
+            # Salva o upload em disco temporariamente. Isso evita manter o
+            # arquivo inteiro e o workbook aberto na memÃ³ria ao mesmo tempo.
+            with NamedTemporaryFile("wb", suffix=extension, dir=OUTPUT_DIR, delete=False) as handle:
+                temporary_upload = Path(handle.name)
+                upload.save(handle)
+            if not temporary_upload.stat().st_size:
+                return jsonify({"error": "O arquivo enviado estÃ¡ vazio."}), 400
+            payload = build_report_from_file(temporary_upload, temporary_report, start, end)
             source_name = Path(upload.filename).name
         else:
             body = request.get_json(silent=True) or {}
@@ -132,12 +137,14 @@ def update():
         payload["periodo"] = {"ano": year, "mes": month}
         payload["update_info"] = {"updated_at":saved["atualizado_em"],"source_name":source_name,"source_type":"supabase"}
         save_local(payload, temporary_report)
-        return jsonify({"ok":True,"message":"Mês salvo no histórico com sucesso.","periodo":payload["periodo"]})
+        return jsonify({"ok":True,"message":"MÃªs salvo no histÃ³rico com sucesso.","periodo":payload["periodo"]})
     except Exception as error:
         app.logger.exception("Falha ao processar a planilha KM X DIA")
         return jsonify({"error": f"Falha ao processar a planilha: {error}"}), 500
     finally:
         temporary_report.unlink(missing_ok=True)
+        if temporary_upload:
+            temporary_upload.unlink(missing_ok=True)
 
 
 @app.errorhandler(413)
@@ -153,16 +160,17 @@ def download():
             month = request.args.get("mes", type=int)
             row = HISTORY.get_month(year, month) if year and month else HISTORY.latest()
             if not row:
-                return jsonify({"error": "O período selecionado não foi encontrado."}), 404
+                return jsonify({"error": "O perÃ­odo selecionado nÃ£o foi encontrado."}), 404
             content = HISTORY.download(row["caminho_arquivo"])
             return send_file(io.BytesIO(content), as_attachment=True, download_name=f"KM X DIA {row['mes']:02d}-{row['ano']}.xlsx")
         if not REPORT.exists():
             return jsonify({"error": "Atualize a base antes de baixar a planilha."}), 404
         return send_file(REPORT, as_attachment=True, download_name="KM X DIA.xlsx")
     except Exception as error:
-        app.logger.exception("Falha ao baixar relatório")
-        return jsonify({"error": f"Falha ao baixar o relatório: {error}"}), 500
+        app.logger.exception("Falha ao baixar relatÃ³rio")
+        return jsonify({"error": f"Falha ao baixar o relatÃ³rio: {error}"}), 500
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
