@@ -99,7 +99,7 @@ def calculate_programmed(ws, start_date, end_date):
     transporta_by_company = defaultdict(float)
     planned_by_line = defaultdict(float)
 
-    for row in ws.iter_rows(min_row=3, max_col=CALENDARIO_FIM, values_only=True):
+    for row in ws.iter_rows(min_row=3, max_row=5000, max_col=CALENDARIO_FIM, values_only=True):
         company = company_name(row[COL_EMPRESA - 1] if len(row) >= COL_EMPRESA else "")
         if not company or company.casefold() in {"none", "nan", "null", "-", "total", "total geral", "total por empresa"}:
             continue
