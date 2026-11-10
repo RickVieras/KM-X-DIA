@@ -88,7 +88,7 @@ def dates_in_period(ws, start_date, end_date):
         if current and start_date <= current <= end_date:
             dates.append((column, current))
     if not dates:
-        raise ValueError("Não foram encontradas datas no calendário AE:BI para o período informado.")
+        raise ValueError("Não foram encontradas datas no calendário AB:BI para o período informado.")
     return dates
 
 
