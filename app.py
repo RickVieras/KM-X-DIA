@@ -1,7 +1,8 @@
-"""AplicaÃ§Ã£o web: histÃ³rico mensal, painel e download do KM X DIA."""
+"""Aplicação web: histórico mensal, painel e download do KM X DIA."""
 from __future__ import annotations
 
 import io
+from copy import deepcopy
 import json
 import os
 from datetime import datetime
@@ -10,7 +11,7 @@ from tempfile import NamedTemporaryFile
 
 from flask import Flask, jsonify, render_template, request, send_file
 
-from km_processor import apply_non_operated, build_report, build_report_from_file, line_efficiency, line_values, write_report_from_payload
+from km_processor import merge_source, apply_non_operated, build_report, build_report_from_file, line_efficiency, line_values, write_report_from_payload
 from supabase_history import SupabaseHistory
 
 app = Flask(__name__, template_folder=".")
@@ -35,9 +36,9 @@ def month_from_payload(payload: dict) -> tuple[int, int]:
         value = datetime.fromisoformat(item["data"])
         periods.add((value.year, value.month))
     if not periods:
-        raise ValueError("NÃ£o foi possÃ­vel identificar o mÃªs pelas datas da planilha.")
+        raise ValueError("Não foi possível identificar o mês pelas datas da planilha.")
     if len(periods) != 1:
-        raise ValueError("A planilha deve conter datas de apenas um mÃªs.")
+        raise ValueError("A planilha deve conter datas de apenas um mês.")
     return periods.pop()
 
 
@@ -51,11 +52,11 @@ def normalized_payload(row: dict) -> dict:
 @app.get("/api/periodos")
 def periods():
     if not HISTORY.enabled:
-        return jsonify({"error": "Supabase nÃ£o configurado no Render."}), 500
+        return jsonify({"error": "Supabase não configurado no Render."}), 500
     try:
         return jsonify({"periodos": HISTORY.list_periods()})
     except Exception as error:
-        app.logger.exception("Falha ao listar perÃ­odos")
+        app.logger.exception("Falha ao listar períodos")
         return jsonify({"error": str(error)}), 500
 
 
@@ -67,14 +68,14 @@ def dashboard():
             month = request.args.get("mes", type=int)
             row = HISTORY.get_month(year, month) if year and month else HISTORY.latest()
             if not row:
-                return jsonify({"ready": False, "message": "Ainda nÃ£o hÃ¡ um mÃªs salvo no histÃ³rico."})
+                return jsonify({"ready": False, "message": "Ainda não há um mês salvo no histórico."})
             return jsonify({"ready": True, **normalized_payload(row)})
         if not DATA.exists():
-            return jsonify({"ready": False, "message": "Ainda nÃ£o hÃ¡ uma atualizaÃ§Ã£o processada."})
+            return jsonify({"ready": False, "message": "Ainda não há uma atualização processada."})
         return jsonify({"ready": True, **json.loads(DATA.read_text(encoding="utf-8"))})
     except Exception as error:
         app.logger.exception("Falha ao carregar o painel")
-        return jsonify({"error": f"Falha ao carregar o histÃ³rico: {error}"}), 500
+        return jsonify({"error": f"Falha ao carregar o histórico: {error}"}), 500
 
 
 def authorized() -> bool:
@@ -93,11 +94,12 @@ def save_local(payload: dict, temporary_report: Path) -> None:
 @app.post("/api/atualizar")
 def update():
     if not authorized():
-        return jsonify({"error": "Acesso nÃ£o autorizado."}), 401
+        return jsonify({"error": "Acesso não autorizado."}), 401
     if not HISTORY.enabled:
         return jsonify({"error": "Configure SUPABASE_URL e SUPABASE_SECRET_KEY no Render."}), 500
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    temporary_report = OUTPUT_DIR / "KM X DIA.processando.xlsx"
+    with NamedTemporaryFile(suffix=".xlsx", dir=OUTPUT_DIR, delete=False) as handle:
+        temporary_report = Path(handle.name)
     temporary_upload = None
     try:
         start_raw = request.form.get("data_inicial")
@@ -118,6 +120,11 @@ def update():
             end = datetime.fromisoformat(end_raw).date()
         if start.year != end.year or start.month != end.month:
             return jsonify({"error": "Para salvar no histórico, escolha datas do mesmo mês."}), 400
+        if start > end:
+            raise ValueError("A data inicial não pode ser maior que a final.")
+        if mode not in {"programado", "quilometragem", "nao_realizada"}:
+            raise ValueError("Tipo de atualização inválido.")
+        source_type = "quilometragem" if mode == "quilometragem" else "custo_variavel"
         year, month = start.year, start.month
 
         if mode == "nao_realizada":
@@ -129,7 +136,10 @@ def update():
             row = HISTORY.get_month(year, month)
             if not row:
                 return jsonify({"error": "Atualize primeiro a planilha PROGRAMADO deste mês."}), 400
-            payload = row.get("dados_dashboard") or {}
+            container = deepcopy(row.get("dados_dashboard") or {})
+            payload = container.get("sources", {}).get("custo_variavel") if container.get("sources") else container
+            if not payload:
+                raise ValueError("Atualize primeiro o Custo Variável deste mês.")
             previous = payload.get("parameters") or {}
             if previous.get("bm1") != start.isoformat() or previous.get("bn1") != end.isoformat():
                 return jsonify({"error": "Use o mesmo período já salvo na leitura PROGRAMADO."}), 400
@@ -139,6 +149,9 @@ def update():
             if not temporary_upload.stat().st_size:
                 return jsonify({"error": "O arquivo de KM Não Realizada está vazio."}), 400
             apply_non_operated(payload, temporary_upload, start, end)
+            if container.get("sources"):
+                container["sources"]["custo_variavel"] = payload
+                payload = {**payload, "sources": container["sources"], "primary_source": "custo_variavel", "originals": container.get("originals", {})}
             write_report_from_payload(payload, temporary_report)
             source_name = Path(non_operated_upload.filename).name
         elif upload and upload.filename:
@@ -150,21 +163,26 @@ def update():
                 upload.save(handle)
             if not temporary_upload.stat().st_size:
                 return jsonify({"error": "O arquivo enviado está vazio."}), 400
-            payload = build_report_from_file(temporary_upload, temporary_report, start, end)
+            fresh = build_report_from_file(temporary_upload, temporary_report, start, end, source_type=source_type)
             old = HISTORY.get_month(year, month)
-            old_payload = old.get("dados_dashboard") if old else None
-            old_params = old_payload.get("parameters") if old_payload else None
-            if old_params and old_params.get("bm1") == start.isoformat() and old_params.get("bn1") == end.isoformat() and old_payload.get("line_non_operated"):
-                payload["line_non_operated"] = old_payload["line_non_operated"]
-                payload["lines"] = line_efficiency(line_values(payload["line_programmed"]), line_values(payload["line_non_operated"]))
-                payload["has_non_operated_data"] = True
-                write_report_from_payload(payload, temporary_report)
             source_name = Path(upload.filename).name
+            payload = merge_source(old.get("dados_dashboard") if old else {}, fresh, source_type, source_name)
+            write_report_from_payload(payload, temporary_report)
         else:
             if not SHEET_ID:
                 return jsonify({"error": "Envie uma planilha PROGRAMADO."}), 400
             payload = build_report(SHEET_ID, temporary_report, start, end)
             source_name = "Google Sheets"
+            old = HISTORY.get_month(year, month)
+            payload = merge_source(old.get("dados_dashboard") if old else {}, payload, "custo_variavel", source_name)
+            write_report_from_payload(payload, temporary_report)
+        if temporary_upload:
+            original_type = "nao_realizada" if mode == "nao_realizada" else source_type
+            original = HISTORY.save_original(year, month, original_type, source_name, temporary_upload, start, end)
+            payload.setdefault("originals", {})[original_type] = original
+        else:
+            # A new Google Sheets reading has no uploaded Excel original attached.
+            payload.setdefault("originals", {}).pop("custo_variavel", None)
         calculated_year, calculated_month = month_from_payload(payload)
         if (calculated_year, calculated_month) != (year, month):
             return jsonify({"error": "As datas do período não correspondem às datas presentes na PROGRAMADO."}), 400
@@ -172,7 +190,9 @@ def update():
         payload["periodo"] = {"ano": year, "mes": month}
         payload["update_info"] = {"updated_at":saved["atualizado_em"],"source_name":source_name,"source_type":"supabase"}
         save_local(payload, temporary_report)
-        return jsonify({"ok":True,"message":"MÃªs salvo no histÃ³rico com sucesso.","periodo":payload["periodo"]})
+        return jsonify({"ok":True,"message":"Mês salvo no histórico com sucesso.","periodo":payload["periodo"]})
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
     except Exception as error:
         app.logger.exception("Falha ao processar a planilha KM X DIA")
         return jsonify({"error": f"Falha ao processar a planilha: {error}"}), 500
@@ -180,6 +200,80 @@ def update():
         temporary_report.unlink(missing_ok=True)
         if temporary_upload:
             temporary_upload.unlink(missing_ok=True)
+
+
+def original_context(values):
+    source = values.get("fonte", "")
+    if source not in {"custo_variavel", "quilometragem", "nao_realizada"}:
+        raise ValueError("Selecione uma fonte válida.")
+    year, month = int(values.get("ano", 0)), int(values.get("mes", 0))
+    if not 1 <= month <= 12 or not 1900 <= year <= 2200:
+        raise ValueError("Selecione um mês válido.")
+    row = HISTORY.get_month(year, month)
+    payload = deepcopy((row or {}).get("dados_dashboard") or {})
+    original = payload.get("originals", {}).get(source)
+    if not original:
+        raise ValueError("Este mês ainda não possui o original desta fonte. Envie a planilha uma vez.")
+    return year, month, source, payload, original
+
+
+@app.get("/api/original")
+def download_original():
+    if not authorized():
+        return jsonify({"error": "Acesso não autorizado."}), 401
+    try:
+        _, _, _, _, original = original_context(request.args)
+        content = HISTORY.download(original["path"])
+        response = send_file(io.BytesIO(content), as_attachment=True, download_name=original["filename"])
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except (ValueError, TypeError) as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        app.logger.exception("Falha ao baixar original")
+        return jsonify({"error": "Não foi possível baixar o original. Confira os logs do servidor."}), 500
+
+
+@app.post("/api/reprocessar")
+def reprocess_original():
+    if not authorized():
+        return jsonify({"error": "Acesso não autorizado."}), 401
+    temporary_report = None
+    try:
+        year, month, source, previous, original = original_context(request.get_json(silent=True) or {})
+        start = datetime.fromisoformat(original["data_inicial"]).date()
+        end = datetime.fromisoformat(original["data_final"]).date()
+        if start > end or (start.year, start.month) != (year, month) or (end.year, end.month) != (year, month):
+            raise ValueError("O período do original não corresponde ao mês selecionado.")
+        content = io.BytesIO(HISTORY.download(original["path"]))
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(suffix=".xlsx", dir=OUTPUT_DIR, delete=False) as handle:
+            temporary_report = Path(handle.name)
+        if source == "nao_realizada":
+            sources = previous.get("sources", {})
+            primary = sources.get("custo_variavel") if sources else previous
+            if not primary or primary.get("parameters") != {"bm1": start.isoformat(), "bn1": end.isoformat()}:
+                raise ValueError("O período do Custo Variável deve ser igual ao do original de KM Não Realizada.")
+            apply_non_operated(primary, content, start, end)
+            payload = {**primary, "sources": sources, "originals": previous.get("originals", {})} if sources else primary
+        else:
+            fresh = build_report_from_file(content, temporary_report, start, end, source_type=source)
+            payload = merge_source(previous, fresh, source, original["filename"])
+        payload["originals"][source]["reprocessed_at"] = datetime.now().astimezone().isoformat()
+        write_report_from_payload(payload, temporary_report)
+        saved = HISTORY.save_month(year, month, original["filename"], temporary_report, payload)
+        payload["periodo"] = {"ano": year, "mes": month}
+        payload["update_info"] = {"updated_at": saved["atualizado_em"], "source_name": original["filename"], "source_type": "supabase"}
+        save_local(payload, temporary_report)
+        return jsonify({"ok": True, "periodo": payload["periodo"], "message": "Arquivo salvo reprocessado com sucesso."})
+    except (ValueError, TypeError) as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception:
+        app.logger.exception("Falha ao reprocessar original")
+        return jsonify({"error": "Não foi possível reprocessar o original. Os dados anteriores foram preservados se a gravação não foi concluída. Confira os logs."}), 500
+    finally:
+        if temporary_report:
+            temporary_report.unlink(missing_ok=True)
 
 
 @app.errorhandler(413)
@@ -195,15 +289,15 @@ def download():
             month = request.args.get("mes", type=int)
             row = HISTORY.get_month(year, month) if year and month else HISTORY.latest()
             if not row:
-                return jsonify({"error": "O perÃ­odo selecionado nÃ£o foi encontrado."}), 404
+                return jsonify({"error": "O período selecionado não foi encontrado."}), 404
             content = HISTORY.download(row["caminho_arquivo"])
             return send_file(io.BytesIO(content), as_attachment=True, download_name=f"KM X DIA {row['mes']:02d}-{row['ano']}.xlsx")
         if not REPORT.exists():
             return jsonify({"error": "Atualize a base antes de baixar a planilha."}), 404
         return send_file(REPORT, as_attachment=True, download_name="KM X DIA.xlsx")
     except Exception as error:
-        app.logger.exception("Falha ao baixar relatÃ³rio")
-        return jsonify({"error": f"Falha ao baixar o relatÃ³rio: {error}"}), 500
+        app.logger.exception("Falha ao baixar relatório")
+        return jsonify({"error": f"Falha ao baixar o relatório: {error}"}), 500
 
 
 if __name__ == "__main__":

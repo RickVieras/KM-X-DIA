@@ -95,6 +95,7 @@ def dates_in_period(ws, start_date, end_date):
 def calculate_programmed(ws, start_date, end_date):
     dates = dates_in_period(ws, start_date, end_date)
     result = defaultdict(lambda: defaultdict(lambda: {field: 0.0 for field in FIELDS}))
+    fleet_categories = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     types = defaultdict(lambda: defaultdict(set))
     transporta_by_company = defaultdict(float)
     planned_by_line = defaultdict(float)
@@ -119,6 +120,8 @@ def calculate_programmed(ws, start_date, end_date):
             km_operational = 0 if transporta else trips * operational
             km_dead = fleet * dead_rate
             entry = result[company][current.isoformat()]
+            category = str(row[6] or "Sem categoria").strip()
+            fleet_categories[company][current.isoformat()][category] += fleet
             entry["frota"] += fleet
             entry["viagens"] += trips
             entry["km_operacional"] += km_operational
@@ -135,7 +138,7 @@ def calculate_programmed(ws, start_date, end_date):
         total = {"empresa": company, **{field: 0.0 for field in FIELDS}}
         out = []
         for key, values in sorted(rows.items()):
-            out.append({"data": key, **values, "tipos": sorted(types[company][key])})
+            out.append({"data": key, **values, "categorias": dict(fleet_categories[company][key]), "tipos": sorted(types[company][key])})
             for field in FIELDS:
                 total[field] += values[field]
                 all_daily[key][field] += values[field]
@@ -260,6 +263,7 @@ def apply_non_operated(payload, non_operated_source, start_date, end_date):
     non_operated = align_non_operated_companies(planned, non_operated)
     non_operated_trips = align_non_operated_companies(planned, non_operated_trips)
     payload["line_programmed"] = line_items(planned)
+    payload["line_non_operated_trips"] = line_items(non_operated_trips)
     payload["line_non_operated"] = line_items(non_operated)
     payload["lines"] = line_efficiency(planned, non_operated, non_operated_trips)
     payload["non_operated_summary"] = non_operated_summary(non_operated, non_operated_trips)
@@ -331,22 +335,26 @@ def write_report_from_payload(payload, destination: Path):
     company_totals = {item["empresa"]: item for item in payload["companies"]}
     for company, rows in payload.get("company_daily", {}).items():
         write_daily_sheet(output, safe_name(company, used), rows, company_totals[company]["km_transporta"])
+    for source, data in payload.get("sources", {}).items():
+        label = "CV" if source == "custo_variavel" else "QUILOMETRAGEM"
+        write_daily_sheet(output, "DIARIO " + label, data["daily"])
     destination.parent.mkdir(parents=True, exist_ok=True)
     output.save(destination)
 
 
-def build_report_from_file(source, destination: Path, start_date, end_date, non_operated_source=None):
+def build_report_from_file(source, destination: Path, start_date, end_date, non_operated_source=None, source_type="custo_variavel"):
     try:
         workbook = load_workbook(source, data_only=True, read_only=True, keep_links=False)
     except Exception as error:
         raise ValueError("O arquivo PROGRAMADO não é uma planilha Excel válida.") from error
     try:
-        if "PROGRAMADO" not in workbook.sheetnames:
-            raise ValueError("A planilha precisa ter a aba PROGRAMADO.")
-        companies, daily, company_daily, planned_by_line = calculate_programmed(workbook["PROGRAMADO"], start_date, end_date)
+        sheet = {"custo_variavel": "PROGRAMADO", "quilometragem": "QUILOMETRAGEM"}.get(source_type)
+        if not sheet or sheet not in workbook.sheetnames:
+            raise ValueError(f"A planilha precisa ter a aba {sheet or source_type}.")
+        companies, daily, company_daily, planned_by_line = calculate_programmed(workbook[sheet], start_date, end_date)
     finally:
         workbook.close()
-    payload = {"companies": companies, "daily": daily, "company_daily": company_daily, "line_programmed": line_items(planned_by_line), "line_non_operated": [], "non_operated_summary": [], "lines": line_efficiency(planned_by_line, {}), "has_non_operated_data": False, "parameters": {"bm1": start_date.isoformat(), "bn1": end_date.isoformat()}}
+    payload = {"source_type": source_type, "companies": companies, "daily": daily, "company_daily": company_daily, "line_programmed": line_items(planned_by_line), "line_non_operated": [], "non_operated_summary": [], "lines": line_efficiency(planned_by_line, {}), "has_non_operated_data": False, "parameters": {"bm1": start_date.isoformat(), "bn1": end_date.isoformat()}}
     if non_operated_source:
         apply_non_operated(payload, non_operated_source, start_date, end_date)
     write_report_from_payload(payload, destination)
@@ -365,3 +373,25 @@ def build_report_from_bytes(source, destination: Path, start_date, end_date):
 
 def build_report(sheet_id, destination: Path, start_date, end_date):
     return build_report_from_bytes(download_source(sheet_id), destination, start_date, end_date)
+
+
+def merge_source(previous, fresh, source_type, source_name):
+    """Preserva cada fonte dentro do JSON mensal existente, inclusive histórico legado."""
+    from copy import deepcopy
+    old = deepcopy(previous or {})
+    sources = old.get("sources", {})
+    if not sources and old.get("daily"):
+        sources[old.get("source_type", "custo_variavel")] = {
+            k: v for k, v in old.items() if k not in ("sources", "periodo", "ready", "originals")
+        }
+    prior = sources.get(source_type, {})
+    if prior.get("parameters") == fresh.get("parameters") and prior.get("has_non_operated_data"):
+        for key in ("line_non_operated", "line_non_operated_trips", "non_operated_summary", "has_non_operated_data"):
+            fresh[key] = deepcopy(prior.get(key, []))
+        fresh["lines"] = line_efficiency(line_values(fresh["line_programmed"]),
+            line_values(fresh.get("line_non_operated")), line_values(fresh.get("line_non_operated_trips")))
+    fresh["source_name"] = source_name
+    fresh["updated_at"] = datetime.now().astimezone().isoformat()
+    sources[source_type] = fresh
+    primary = "custo_variavel" if "custo_variavel" in sources else "quilometragem"
+    return {**deepcopy(sources[primary]), "sources": sources, "primary_source": primary, "originals": deepcopy(old.get("originals", {}))}

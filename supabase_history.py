@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -48,7 +49,7 @@ class SupabaseHistory:
         return rows[0] if rows else None
 
     def save_month(self, year: int, month: int, filename: str, report: Path, payload: dict) -> dict:
-        storage_path = f"{year}/{month:02d}/KM X DIA.xlsx"
+        storage_path = f"{year}/{month:02d}/relatorios/{uuid4().hex}/KM X DIA.xlsx"
         with report.open("rb") as handle:
             upload = requests.post(f"{self.url}/storage/v1/object/{BUCKET}/{quote(storage_path, safe='/')}", headers=self.headers(**{"Content-Type":XLSX_MIME,"x-upsert":"true"}), data=handle, timeout=90)
         self.check(upload)
@@ -60,3 +61,23 @@ class SupabaseHistory:
     def download(self, storage_path: str) -> bytes:
         response = requests.get(f"{self.url}/storage/v1/object/authenticated/{BUCKET}/{quote(storage_path, safe='/')}", headers=self.headers(), timeout=90)
         return self.check(response).content
+
+
+    def save_original(self, year, month, source_type, filename, local_file, start, end):
+        if source_type not in {"custo_variavel", "quilometragem", "nao_realizada"}:
+            raise ValueError("Fonte inválida.")
+        extension = Path(filename).suffix.lower()
+        if extension not in {".xlsx", ".xlsm"}:
+            raise ValueError("Formato de arquivo inválido.")
+        storage_path = f"originais/{year}/{month:02d}/{source_type}/{uuid4().hex}{extension}"
+        mime = XLSX_MIME if extension == ".xlsx" else "application/vnd.ms-excel.sheet.macroEnabled.12"
+        with Path(local_file).open("rb") as handle:
+            response = requests.post(
+                f"{self.url}/storage/v1/object/{BUCKET}/{quote(storage_path, safe='/')}",
+                headers=self.headers(**{"Content-Type": mime, "x-upsert": "false"}),
+                data=handle, timeout=90)
+        self.check(response)
+        return {"path": storage_path, "filename": Path(filename).name,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "size_bytes": Path(local_file).stat().st_size,
+                "data_inicial": start.isoformat(), "data_final": end.isoformat()}
